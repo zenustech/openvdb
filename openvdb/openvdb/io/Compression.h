@@ -177,12 +177,12 @@ struct RealToHalf {
 };
 template<> struct RealToHalf<float> {
     enum { isReal = true };
-    using HalfT = half;
+    using HalfT = math::half;
     static HalfT convert(float val) { return HalfT(val); }
 };
 template<> struct RealToHalf<double> {
     enum { isReal = true };
-    using HalfT = half;
+    using HalfT = math::half;
     // A half can only be constructed from a float, so cast the value to a float first.
     static HalfT convert(double val) { return HalfT(float(val)); }
 };
@@ -419,7 +419,7 @@ struct HalfWriter</*IsReal=*/true, T> {
         writeData<HalfT>(os, reinterpret_cast<const HalfT*>(&halfData[0]), count, compression);
     }
 };
-#ifdef _MSC_VER
+#ifdef _WIN32
 /// Specialization to avoid double to float warnings in MSVC
 template<>
 struct HalfWriter</*IsReal=*/true, double> {
@@ -442,7 +442,7 @@ struct HalfWriter</*IsReal=*/true, double> {
         writeData<HalfT>(os, reinterpret_cast<const HalfT*>(&halfData[0]), count, compression);
     }
 };
-#endif // _MSC_VER
+#endif // _WIN32
 
 
 ////////////////////////////////////////

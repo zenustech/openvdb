@@ -112,8 +112,25 @@ Function::create(llvm::LLVMContext& C, llvm::Module* M) const
             this->symbol(),
             M);
 
+    if (!mNames.empty()) {
+        // If some argument names have been specified, name the llvm values.
+        // This provides a more reliable way for function to index into values
+        // rather than relying on their position in the argument vector
+        // @note  This does not guarantee that all arguments will have valid
+        //   names
+        for (llvm::Argument& arg : function->args()) {
+            const char* name = this->argName(arg.getArgNo());
+            if (name) arg.setName(name);
+        }
+    }
+
     function->setAttributes(this->flattenAttrs(C));
     return function;
+}
+
+llvm::Function* Function::get(const llvm::Module& M) const
+{
+    return M.getFunction(this->symbol());
 }
 
 llvm::Value*
@@ -153,7 +170,7 @@ Function::match(const std::vector<llvm::Type*>& inputs, llvm::LLVMContext& C) co
     this->types(signature, C);
     if (inputs == signature) return Explicit;
 
-    llvm::Type* strType = LLVMType<AXString>::get(C);
+    llvm::Type* strType = LLVMType<codegen::String>::get(C);
 
     // try implicit - signature should not be empty here
     for (size_t i = 0; i < signature.size(); ++i) {
@@ -222,7 +239,7 @@ Function::cast(std::vector<llvm::Value*>& args,
         }
         else {
             if (types[i] == LLVMType<char*>::get(C)) {
-                llvm::Type* strType = LLVMType<AXString>::get(C);
+                llvm::Type* strType = LLVMType<codegen::String>::get(C);
                 if (type->getContainedType(0) == strType) {
                     value = B.CreateStructGEP(strType, value, 0); // char**
                     value = B.CreateLoad(value); // char*
@@ -362,12 +379,12 @@ llvm::Value* IRFunctionBase::call(const std::vector<llvm::Value*>& args,
 ///////////////////////////////////////////////////////////////////////////
 
 
-Function::Ptr
+const Function*
 FunctionGroup::match(const std::vector<llvm::Type*>& types,
       llvm::LLVMContext& C,
       Function::SignatureMatch* type) const
 {
-    Function::Ptr targetFunction;
+    const Function* targetFunction = nullptr;
     if (type) *type = Function::SignatureMatch::None;
 
     for (const auto& function : mFunctionList) {
@@ -378,10 +395,10 @@ FunctionGroup::match(const std::vector<llvm::Type*>& types,
         if (matchtype == Function::SignatureMatch::None)      continue;
         else if (matchtype == Function::SignatureMatch::Size) continue;
         else if (matchtype == Function::SignatureMatch::Explicit) {
-            return function;
+            return function.get();
         }
         else if (matchtype == Function::SignatureMatch::Implicit) {
-            if (!targetFunction) targetFunction = function;
+            if (!targetFunction) targetFunction = function.get();
         }
     }
 
@@ -395,23 +412,41 @@ FunctionGroup::execute(const std::vector<llvm::Value*>& args,
     std::vector<llvm::Type*> inputTypes;
     valuesToTypes(args, inputTypes);
 
-    llvm::LLVMContext& C = B.getContext();
+    Function::SignatureMatch match;
+    const Function* target = this->match(inputTypes, B.getContext(), &match);
+    assert(target);
+    llvm::Value* result =
+        target->call(args, B, /*cast=*/match == Function::SignatureMatch::Implicit);
+
+#ifndef NDEBUG
+    std::vector<llvm::Type*> unused;
+    llvm::Type* ret = target->types(unused, B.getContext());
+    assert(result || ret->isVoidTy());
+#endif
+    return result;
+}
+
+const Function*
+FunctionGroup::execute(const std::vector<llvm::Value*>& args,
+            llvm::IRBuilder<>& B,
+            llvm::Value*& result) const
+{
+    std::vector<llvm::Type*> inputTypes;
+    valuesToTypes(args, inputTypes);
 
     Function::SignatureMatch match;
-    const Function::Ptr target = this->match(inputTypes, C, &match);
+    const Function* target = this->match(inputTypes, B.getContext(), &match);
+    if (!target) return nullptr;
 
-    llvm::Value* result = nullptr;
-    if (!target) return result;
+    result = target->call(args, B, /*cast=*/match == Function::SignatureMatch::Implicit);
 
-    if (match == Function::SignatureMatch::Implicit) {
-        result = target->call(args, B, /*cast=*/true);
-    }
-    else {
-        // match == Function::SignatureMatch::Explicit
-        result = target->call(args, B, /*cast=*/false);
-    }
-    assert(result);
-    return result;
+#ifndef NDEBUG
+    std::vector<llvm::Type*> unused;
+    llvm::Type* ret = target->types(unused, B.getContext());
+    assert(result || ret->isVoidTy());
+#endif
+
+    return target;
 }
 
 } // namespace codegen

@@ -132,12 +132,17 @@ using M4F = ArgType<float, 16>;
 template <typename T> struct TypeToSymbol { static inline std::string s() { return "?"; } };
 template <> struct TypeToSymbol<void> { static inline std::string s() { return "v"; } };
 template <> struct TypeToSymbol<char> { static inline std::string s() { return "c"; } };
+template <> struct TypeToSymbol<uint8_t>  { static inline std::string s() { return "u8"; } };
+template <> struct TypeToSymbol<uint16_t> { static inline std::string s() { return "us"; } };
+template <> struct TypeToSymbol<uint32_t> { static inline std::string s() { return "ui"; } };
+template <> struct TypeToSymbol<uint64_t> { static inline std::string s() { return "ul"; } };
+template <> struct TypeToSymbol<int8_t>  { static inline std::string s() { return "8"; } };
 template <> struct TypeToSymbol<int16_t> { static inline std::string s() { return "s"; } };
 template <> struct TypeToSymbol<int32_t> { static inline std::string s() { return "i"; } };
 template <> struct TypeToSymbol<int64_t> { static inline std::string s() { return "l"; } };
 template <> struct TypeToSymbol<float> { static inline std::string s() { return "f"; } };
 template <> struct TypeToSymbol<double> { static inline std::string s() { return "d"; } };
-template <> struct TypeToSymbol<AXString> { static inline std::string s() { return "a"; } };
+template <> struct TypeToSymbol<codegen::String> { static inline std::string s() { return "a"; } };
 
 template <typename T>
 struct TypeToSymbol<T*> {
@@ -245,7 +250,7 @@ llvmFunctionTypeFromSignature(llvm::LLVMContext& C)
 ///               skipped
 /// @param  axTypes Whether to try and convert the llvm::Types provided to
 ///                 AX types. If false, the llvm types are used.
-void
+OPENVDB_AX_API void
 printSignature(std::ostream& os,
                const std::vector<llvm::Type*>& types,
                const llvm::Type* returnType,
@@ -258,7 +263,7 @@ printSignature(std::ostream& os,
 
 /// @brief  The base/abstract representation of an AX function. Derived classes
 ///         must implement the Function::types call to describe their signature.
-struct Function
+struct OPENVDB_AX_API Function
 {
     using Ptr = std::shared_ptr<Function>;
 
@@ -290,6 +295,8 @@ struct Function
     ///          of the modules function list. If no module is provided, the
     ///          function is left detached and must be added to a valid Module
     ///          to be callable.
+    /// @warning If a module is not provided, the caller takes ownership of the
+    ///          returned function and is responsible for deallocating it.
     /// @note    The body of the function is left to derived classes to
     ///          implement. As you need a Module to generate the prototype/body,
     ///          this function serves two purposes. The first is to return the
@@ -311,9 +318,17 @@ struct Function
         return this->create(M.getContext(), &M);
     }
 
+    /// @brief  Convenience method for calling M.getFunction(symbol). Returns a
+    ///         nullptr if the function has not yet been created or if it is
+    ///         embedded IR.
+    /// @param M  The llvm::Module to use
+    llvm::Function* get(const llvm::Module& M) const;
+
     /// @brief  Uses the IRBuilder to create a call to this function with the
     ///         given arguments, creating the function and inserting it into the
     ///         IRBuilder's Module if necessary (through Function::create).
+    ///         Returns the result of the function call which can be a nullptr
+    ///         if the function is a non-sret void call.
     /// @note   The IRBuilder must have a valid llvm Module/Function/Block
     ///         attached
     /// @note   If the number of provided arguments do not match the size of the
@@ -600,13 +615,15 @@ struct CFunction : public CFunctionBase
     using Ptr = std::shared_ptr<CFunctionT>;
     using Traits = FunctionTraits<SignatureT>;
 
-    // Assert that the return argument is not a pointer. Note that this is
-    // relaxed for IR functions where it's allowed if the function is embedded.
-    static_assert(!std::is_pointer<typename Traits::ReturnType>::value,
+    // Assert that the return argument is not a pointer (relaxed for void* for mallocs).
+    // Note that this is relaxed for IR functions where it's allowed if the function is
+    // forcefully inlined.
+    static_assert(std::is_same<typename Traits::ReturnType, void*>::value ||
+        !std::is_pointer<typename Traits::ReturnType>::value,
         "CFunction object has been setup with a pointer return argument. C bindings "
         "cannot return memory locations to LLVM - Consider using a CFunctionSRet.");
 
-    CFunction(const std::string& symbol, const SignatureT function)
+    CFunction(const std::string& symbol, SignatureT* function)
         : CFunctionBase(Traits::N_ARGS, symbol)
         , mFunction(function) {}
 
@@ -654,11 +671,11 @@ struct CFunction : public CFunctionBase
     }
 
 private:
-    const SignatureT* mFunction;
+    SignatureT* mFunction;
 };
 
 /// @brief  The base/abstract definition for an IR function.
-struct IRFunctionBase : public Function
+struct OPENVDB_AX_API IRFunctionBase : public Function
 {
     using Ptr = std::shared_ptr<IRFunctionBase>;
 
@@ -673,9 +690,6 @@ struct IRFunctionBase : public Function
     ///           a ret void, a ret void instruction, or an actual value
     using GeneratorCb = std::function<llvm::Value*
         (const std::vector<llvm::Value*>&, llvm::IRBuilder<>&)>;
-
-    llvm::Type* types(std::vector<llvm::Type*>& types,
-            llvm::LLVMContext& C) const override = 0;
 
     /// @brief  Enable or disable the embedding of IR. Embedded IR is currently
     ///         required for function which use parent function parameters.
@@ -775,7 +789,7 @@ struct IRFunctionSRet : public SRetFunction<SignatureT, IRFunction<SignatureT>>
 };
 
 /// @brief  todo
-struct FunctionGroup
+struct OPENVDB_AX_API FunctionGroup
 {
     using Ptr = std::shared_ptr<FunctionGroup>;
     using UniquePtr = std::unique_ptr<FunctionGroup>;
@@ -802,29 +816,44 @@ struct FunctionGroup
     /// @param types  A vector of types representing the function argument types
     /// @param C      The llvm context
     /// @param type   If provided, type is set to the type of match that occurred
-    ///
-    Function::Ptr
+    const Function*
     match(const std::vector<llvm::Type*>& types,
           llvm::LLVMContext& C,
           Function::SignatureMatch* type = nullptr) const;
 
-    /// @brief  Given a vector of llvm values provided by the user, find the
-    ///         best possible function signature, generate and execute the
-    ///         function body. Returns the return value of the function (can be
-    ///         void).
-    /// @note   This function will throw if not compatible match is found or if
-    ///         no valid return is provided by the matched declarations
-    ///         implementation.
+    /// @brief  Given a vector of llvm values, find the best possible function
+    ///         signature, generate and execute the function body. Returns the
+    ///         return value of the function (nullptr if void). The behaviour
+    ///         is undefined if a valid match does not exist. For such cases,
+    ///         call the second version of FunctionGroup::execute.
+    /// @note   This function will throw if no valid return is provided by the
+    ///         matched declaration implementation.
     ///
     /// @param args     A vector of values representing the function arguments
     /// @param B        The current llvm IRBuilder
-    ///
     llvm::Value*
     execute(const std::vector<llvm::Value*>& args,
             llvm::IRBuilder<>& B) const;
 
-    /// @brief  Accessor to the underlying function signature list
+    /// @brief  Given a vector of llvm values, find the best possible function
+    ///         signature, generate and execute the function body. Returns the
+    ///         Function that was selected and executed or a nullptr if no
+    ///         valid match was found. Sets the result variable to the return
+    ///         value of the function (nullptr if void). If no match is found,
+    ///         the result variable if left unset.
+    /// @note   This function will throw if no valid return is provided by the
+    ///         matched declaration implementation.
     ///
+    /// @param args     A vector of values representing the function arguments
+    /// @param B        The current llvm IRBuilder
+    /// @param result   The result to set. nullptr on void return.
+    /// @return The matched function. nullptr if no match was found
+    const Function*
+    execute(const std::vector<llvm::Value*>& args,
+            llvm::IRBuilder<>& B,
+            llvm::Value*& result) const;
+
+    /// @brief  Accessor to the underlying function signature list
     inline const FunctionList& list() const { return mFunctionList; }
     const char* name() const { return mName; }
     const char* doc() const { return mDoc; }

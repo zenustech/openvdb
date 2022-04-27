@@ -6,13 +6,11 @@
 #ifndef OPENVDB_PLATFORM_HAS_BEEN_INCLUDED
 #define OPENVDB_PLATFORM_HAS_BEEN_INCLUDED
 
-#include "PlatformConfig.h"
-
 #define PRAGMA(x) _Pragma(#x)
 
 /// @name Utilities
 /// @{
-/// @cond OPENVDB_VERSION_INTERNAL
+/// @cond OPENVDB_DOCS_INTERNAL
 #define OPENVDB_PREPROC_STRINGIFY_(x) #x
 /// @endcond
 /// @brief Return @a x as a string literal.  If @a x is a macro,
@@ -20,7 +18,7 @@
 /// @hideinitializer
 #define OPENVDB_PREPROC_STRINGIFY(x) OPENVDB_PREPROC_STRINGIFY_(x)
 
-/// @cond OPENVDB_VERSION_INTERNAL
+/// @cond OPENVDB_DOCS_INTERNAL
 #define OPENVDB_PREPROC_CONCAT_(x, y) x ## y
 /// @endcond
 /// @brief Form a new token by concatenating two existing tokens.
@@ -28,19 +26,6 @@
 /// @hideinitializer
 #define OPENVDB_PREPROC_CONCAT(x, y) OPENVDB_PREPROC_CONCAT_(x, y)
 /// @}
-
-
-/// Use OPENVDB_DEPRECATED to mark functions as deprecated.
-/// It should be placed right before the signature of the function,
-/// e.g., "OPENVDB_DEPRECATED void functionName();".
-#ifdef OPENVDB_DEPRECATED
-#undef OPENVDB_DEPRECATED
-#endif
-#ifdef _MSC_VER
-    #define OPENVDB_DEPRECATED  __declspec(deprecated)
-#else
-    #define OPENVDB_DEPRECATED  __attribute__ ((deprecated))
-#endif
 
 /// Macro for determining if GCC version is >= than X.Y
 #if defined(__GNUC__)
@@ -67,6 +52,31 @@
     #endif
 #endif
 
+/// Windows defines
+#ifdef _WIN32
+    // Math constants are not included in <cmath> unless _USE_MATH_DEFINES is
+    // defined on MSVC
+    // https://docs.microsoft.com/en-us/cpp/c-runtime-library/math-constants
+    #ifndef _USE_MATH_DEFINES
+        #define _USE_MATH_DEFINES
+    #endif
+    ///Disable the non-portable Windows definitions of min() and max() macros
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+
+    // By default, assume we're building OpenVDB as a DLL if we're dynamically
+    // linking in the CRT, unless OPENVDB_STATICLIB is defined.
+    #if defined(_DLL) && !defined(OPENVDB_STATICLIB) && !defined(OPENVDB_DLL)
+        #define OPENVDB_DLL
+    #endif
+
+    // By default, assume that we're dynamically linking OpenEXR, unless
+    // OPENVDB_OPENEXR_STATICLIB is defined.
+    #if !defined(OPENVDB_OPENEXR_STATICLIB) && !defined(OPENEXR_DLL)
+        #define OPENEXR_DLL
+    #endif
+#endif
 
 /// Bracket code with OPENVDB_NO_UNREACHABLE_CODE_WARNING_BEGIN/_END,
 /// as in the following example, to inhibit ICC remarks about unreachable code:
@@ -106,6 +116,15 @@
     #define OPENVDB_NO_UNREACHABLE_CODE_WARNING_END
 #endif
 
+/// Deprecation macros. Define OPENVDB_NO_DEPRECATION_WARNINGS to disable all
+/// deprecation warnings in OpenVDB.
+#ifndef OPENVDB_NO_DEPRECATION_WARNINGS
+#define OPENVDB_DEPRECATED [[deprecated]]
+#define OPENVDB_DEPRECATED_MESSAGE(msg) [[deprecated(msg)]]
+#else
+#define OPENVDB_DEPRECATED
+#define OPENVDB_DEPRECATED_MESSAGE(msg)
+#endif
 
 /// @brief Bracket code with OPENVDB_NO_DEPRECATION_WARNING_BEGIN/_END,
 /// to inhibit warnings about deprecated code.
@@ -195,10 +214,6 @@
 #ifdef OPENVDB_IMPORT
 #undef OPENVDB_IMPORT
 #endif
-#ifdef __GNUC__
-    #define OPENVDB_EXPORT __attribute__((visibility("default")))
-    #define OPENVDB_IMPORT __attribute__((visibility("default")))
-#endif
 #ifdef _WIN32
     #ifdef OPENVDB_DLL
         #define OPENVDB_EXPORT __declspec(dllexport)
@@ -207,6 +222,23 @@
         #define OPENVDB_EXPORT
         #define OPENVDB_IMPORT
     #endif
+#elif defined(__GNUC__)
+    #define OPENVDB_EXPORT __attribute__((visibility("default")))
+    #define OPENVDB_IMPORT __attribute__((visibility("default")))
+#endif
+
+/// Helper macros for explicit template instantiation
+#if defined(_WIN32) && defined(OPENVDB_DLL)
+    #ifdef OPENVDB_PRIVATE
+        #define OPENVDB_TEMPLATE_EXPORT OPENVDB_EXPORT
+        #define OPENVDB_TEMPLATE_IMPORT
+    #else
+        #define OPENVDB_TEMPLATE_EXPORT
+        #define OPENVDB_TEMPLATE_IMPORT OPENVDB_IMPORT
+    #endif
+#else
+    #define OPENVDB_TEMPLATE_IMPORT
+    #define OPENVDB_TEMPLATE_EXPORT
 #endif
 
 /// All classes and public free standing functions must be explicitly marked
@@ -228,6 +260,19 @@
 #else
     #define OPENVDB_HOUDINI_API OPENVDB_IMPORT
 #endif
+
+#ifdef OPENVDB_AX_DLL
+#ifdef OPENVDB_AX_API
+#undef OPENVDB_AX_API
+#endif
+#ifdef OPENVDB_AX_PRIVATE
+    #define OPENVDB_AX_API OPENVDB_EXPORT
+#else
+    #define OPENVDB_AX_API OPENVDB_IMPORT
+#endif
+#else
+#define OPENVDB_AX_API
+#endif // OPENVDB_AX_DLL
 
 #if defined(__ICC)
 

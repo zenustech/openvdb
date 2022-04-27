@@ -1,11 +1,13 @@
 // Copyright Contributors to the OpenVDB Project
 // SPDX-License-Identifier: MPL-2.0
 
-#include "gtest/gtest.h"
 #include <openvdb/openvdb.h>
 #include <openvdb/points/PointDataGrid.h>
 #include <openvdb/points/PointConversion.h>
 #include <openvdb/points/PointMask.h>
+
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -48,6 +50,11 @@ TEST_F(TestPointMask, testMask)
 
         EXPECT_EQ(points->tree().activeVoxelCount(), Index64(4));
         EXPECT_EQ(mask->tree().activeVoxelCount(), Index64(4));
+
+        // also test tree function signature
+        auto maskTree = convertPointsToMask(points->tree());
+        EXPECT_EQ(maskTree->activeVoxelCount(), Index64(4));
+        EXPECT_TRUE(maskTree->hasSameTopology(mask->tree()));
     }
 
     { // mask grid instead of bool grid

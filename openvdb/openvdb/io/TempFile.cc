@@ -6,7 +6,7 @@
 #include "TempFile.h"
 
 #include <openvdb/Exceptions.h>
-#ifndef _MSC_VER
+#ifndef _WIN32
 #include <boost/iostreams/stream.hpp>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <cstdlib> // for std::getenv(), mkstemp()
@@ -37,7 +37,7 @@ struct TempFile::TempFileImpl
     /// @internal boost::filesystem::unique_path(), etc. might be useful here,
     /// but as of 9/2014, Houdini ships without the Boost.Filesystem library,
     /// which makes it much less convenient to use that library.
-#ifndef _MSC_VER
+#ifndef _WIN32
     TempFileImpl(std::ostream& os): mFileDescr(-1) { this->init(os); }
 
     void init(std::ostream& os)
@@ -70,7 +70,11 @@ struct TempFile::TempFileImpl
     {
         if (const char* dir = std::getenv("OPENVDB_TEMP_DIR")) {
             if (0 != ::access(dir, F_OK)) {
+#ifdef _WIN32
+                ::mkdir(dir);
+#else
                 ::mkdir(dir, S_IRUSR | S_IWUSR | S_IXUSR);
+#endif
                 if (0 != ::access(dir, F_OK)) {
                     OPENVDB_THROW(IoError,
                         "failed to create OPENVDB_TEMP_DIR (" + std::string(dir) + ")");
@@ -89,7 +93,7 @@ struct TempFile::TempFileImpl
     DeviceType mDevice;
     BufferType mBuffer;
     int mFileDescr;
-#else // _MSC_VER
+#else // _WIN32
     // Use only standard library routines; no POSIX.
 
     TempFileImpl(std::ostream& os) { this->init(os); }
@@ -117,7 +121,7 @@ struct TempFile::TempFileImpl
 
     std::string mPath;
     std::filebuf mBuffer;
-#endif // _MSC_VER
+#endif // _WIN32
 
 private:
     TempFileImpl(const TempFileImpl&); // disable copying

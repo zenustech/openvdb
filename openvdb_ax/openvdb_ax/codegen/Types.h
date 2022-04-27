@@ -11,9 +11,9 @@
 #ifndef OPENVDB_AX_CODEGEN_TYPES_HAS_BEEN_INCLUDED
 #define OPENVDB_AX_CODEGEN_TYPES_HAS_BEEN_INCLUDED
 
-#include "../ast/Tokens.h"
-#include "../Exceptions.h"
-#include "../compiler/CustomData.h" // for AXString
+#include "openvdb_ax/ast/Tokens.h"
+#include "openvdb_ax/Exceptions.h"
+#include "String.h"
 
 #include <openvdb/version.h>
 #include <openvdb/Types.h>
@@ -80,6 +80,7 @@ struct LLVMType
         }
         else if (std::is_floating_point<T>::value) {
             switch (bits) {
+                case 16: return llvm::Type::getHalfTy(C);
                 case 32: return llvm::Type::getFloatTy(C);
                 case 64: return llvm::Type::getDoubleTy(C);
             }
@@ -169,39 +170,19 @@ struct LLVMType<char> : public LLVMType<uint8_t>
 };
 
 template <>
-struct LLVMType<AXString>
+struct LLVMType<codegen::String>
 {
     static inline llvm::StructType*
     get(llvm::LLVMContext& C) {
         const std::vector<llvm::Type*> types {
-            LLVMType<char*>::get(C),  // array
-            LLVMType<AXString::SizeType>::get(C) // size
+            LLVMType<char*>::get(C),  // ptr
+            LLVMType<char[codegen::String::SSO_LENGTH]>::get(C),  // SSO
+            LLVMType<int64_t>::get(C) // size
         };
         return llvm::StructType::get(C, types);
     }
-    static inline llvm::Value*
-    get(llvm::LLVMContext& C, llvm::Constant* string, llvm::Constant* size) {
-        return llvm::ConstantStruct::get(LLVMType<AXString>::get(C), {string, size});
-    }
-    /// @note Creating strings from a literal requires a GEP instruction to
-    ///   store the string ptr on the struct.
-    /// @note Usually you should be using s = builder.CreateGlobalStringPtr()
-    ///   followed by LLVMType<AXString>::get(C, s) rather than allocating
-    ///   a non global string
-    static inline llvm::Value*
-    get(llvm::LLVMContext& C, const std::string& string, llvm::IRBuilder<>& builder) {
-        llvm::Constant* constant =
-            llvm::ConstantDataArray::getString(C, string, /*terminator*/true);
-        llvm::Constant* size = llvm::cast<llvm::Constant>
-            (LLVMType<AXString::SizeType>::get(C, static_cast<AXString::SizeType>(string.size())));
-        llvm::Value* zero = LLVMType<int32_t>::get(C, 0);
-        llvm::Value* args[] = { zero, zero };
-        constant = llvm::cast<llvm::Constant>
-            (builder.CreateInBoundsGEP(constant->getType(), constant, args));
-        return LLVMType<AXString>::get(C, constant, size);
-    }
     static inline llvm::Constant*
-    get(llvm::LLVMContext& C, const AXString* const string)
+    get(llvm::LLVMContext& C, const codegen::String* const string)
     {
         return LLVMType<uintptr_t>::get(C,
             reinterpret_cast<uintptr_t>(string));
@@ -219,6 +200,25 @@ struct LLVMType<void>
 
 /// @note void* implemented as signed int_t* to match clang IR generation
 template <> struct LLVMType<void*> : public LLVMType<int_t<sizeof(void*)>::type*> {};
+template <> struct LLVMType<openvdb::math::half>
+{
+    // @note LLVM has a special representation of half types. Don't alias to
+    //   uint16_t as we want type->isFloatingPointTy() to still return true.
+
+    static inline llvm::Type* get(llvm::LLVMContext& C) { return llvm::Type::getHalfTy(C); }
+    static inline llvm::Constant* get(llvm::LLVMContext& C, const openvdb::math::half V)
+    {
+        llvm::Type* type = LLVMType<openvdb::math::half>::get(C);
+        assert(llvm::ConstantFP::isValueValidForType(type, llvm::APFloat(V)));
+        llvm::Constant* constant = llvm::ConstantFP::get(type, static_cast<double>(V));
+        assert(constant);
+        return constant;
+    }
+    static inline llvm::Constant* get(llvm::LLVMContext& C, const openvdb::math::half* const V)
+    {
+        return LLVMType<uintptr_t>::get(C, reinterpret_cast<uintptr_t>(V));
+    }
+};
 
 template <typename T> struct LLVMType<const T> : public LLVMType<T> {};
 template <typename T> struct LLVMType<const T*> : public LLVMType<T*> {};
@@ -263,11 +263,11 @@ struct AliasTypeMap
 
 /// @brief  Supported aliasing for VDB math types, allowing use in external
 ///         function signatures.
-template <typename T> struct LLVMType<math::Vec2<T>> : public AliasTypeMap<math::Vec2<T>, T[2]> {};
-template <typename T> struct LLVMType<math::Vec3<T>> : public AliasTypeMap<math::Vec3<T>, T[3]> {};
-template <typename T> struct LLVMType<math::Vec4<T>> : public AliasTypeMap<math::Vec4<T>, T[4]> {};
-template <typename T> struct LLVMType<math::Mat3<T>> : public AliasTypeMap<math::Mat3<T>, T[9]> {};
-template <typename T> struct LLVMType<math::Mat4<T>> : public AliasTypeMap<math::Mat4<T>, T[16]> {};
+template <typename T> struct LLVMType<openvdb::math::Vec2<T>> : public AliasTypeMap<openvdb::math::Vec2<T>, T[2]> {};
+template <typename T> struct LLVMType<openvdb::math::Vec3<T>> : public AliasTypeMap<openvdb::math::Vec3<T>, T[3]> {};
+template <typename T> struct LLVMType<openvdb::math::Vec4<T>> : public AliasTypeMap<openvdb::math::Vec4<T>, T[4]> {};
+template <typename T> struct LLVMType<openvdb::math::Mat3<T>> : public AliasTypeMap<openvdb::math::Mat3<T>, T[9]> {};
+template <typename T> struct LLVMType<openvdb::math::Mat4<T>> : public AliasTypeMap<openvdb::math::Mat4<T>, T[16]> {};
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
@@ -283,6 +283,17 @@ struct FunctionTraits<R(&)(Args...)> : public FunctionTraits<R(Args...)> {};
 
 template<typename R, typename... Args>
 struct FunctionTraits<R(*)(Args...)> : public FunctionTraits<R(Args...)> {};
+
+// Only enable noexcept signatures from C++17 onwards when it is actually
+// respected. Otherwise the compiler ignores it and we get duplicating
+// definitions for FunctionTraits specializations.
+#if __cplusplus >= 201703L
+template<typename R, typename... Args>
+struct FunctionTraits<R(Args...) noexcept> : public FunctionTraits<R(Args...)> {};
+
+template<typename R, typename... Args>
+struct FunctionTraits<R(*)(Args...) noexcept> : public FunctionTraits<R(Args...)> {};
+#endif
 
 template<typename ReturnT, typename ...Args>
 struct FunctionTraits<ReturnT(Args...)>
@@ -332,13 +343,13 @@ llvmConstant(const T t, llvm::Type* type)
 /// @param size  The number of bits of the integer type
 /// @param C     The LLVMContext to request the Type from.
 ///
-llvm::IntegerType* llvmIntType(const uint32_t size, llvm::LLVMContext& C);
+OPENVDB_AX_API llvm::IntegerType* llvmIntType(const uint32_t size, llvm::LLVMContext& C);
 
 /// @brief Returns an llvm floating point Type given a requested size and context
 /// @param size  The size of the float to request, i.e. float - 32, double - 64 etc.
 /// @param C     The LLVMContext to request the Type from.
 ///
-llvm::Type* llvmFloatType(const uint32_t size, llvm::LLVMContext& C);
+OPENVDB_AX_API llvm::Type* llvmFloatType(const uint32_t size, llvm::LLVMContext& C);
 
 /// @brief  Returns an llvm type representing a type defined by a string.
 /// @note   For string types, this function returns the element type, not the
@@ -347,14 +358,14 @@ llvm::Type* llvmFloatType(const uint32_t size, llvm::LLVMContext& C);
 /// @param type  The AX token type
 /// @param C     The LLVMContext to request the Type from.
 ///
-llvm::Type* llvmTypeFromToken(const ast::tokens::CoreType& type, llvm::LLVMContext& C);
+OPENVDB_AX_API llvm::Type* llvmTypeFromToken(const ast::tokens::CoreType& type, llvm::LLVMContext& C);
 
 /// @brief  Return a corresponding AX token which represents the given LLVM Type.
 /// @note   If the type does not exist in AX, ast::tokens::UNKNOWN is returned.
 ///         Must not be a nullptr.
 /// @param type  a valid LLVM Type
 ///
-ast::tokens::CoreType tokenFromLLVMType(const llvm::Type* type);
+OPENVDB_AX_API ast::tokens::CoreType tokenFromLLVMType(const llvm::Type* type);
 
 } // namespace codegen
 } // namespace ax

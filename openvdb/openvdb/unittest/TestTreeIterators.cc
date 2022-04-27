@@ -1,11 +1,12 @@
 // Copyright Contributors to the OpenVDB Project
 // SPDX-License-Identifier: MPL-2.0
 
-#include "gtest/gtest.h"
 #include <openvdb/tree/Tree.h>
 #include <openvdb/openvdb.h>
 #include <openvdb/Types.h>
 #include <openvdb/tools/LevelSetSphere.h> // for tools::createLevelSetSphere()
+
+#include <gtest/gtest.h>
 
 
 #define ASSERT_DOUBLES_EXACTLY_EQUAL(expected, actual) \
@@ -434,6 +435,8 @@ TEST_F(TestTreeIterators, testModifyValue)
         //tree.cbeginValueOn().modifyValue(Local::negate);
     }
     {
+        // @note  StringTree types as native types are deprecated, but we can
+        //   still test tool functionality with them
         typedef openvdb::tree::Tree4<std::string, DIM2, DIM1, DIM0>::Type StringTree323f;
 
         StringTree323f tree(/*background=*/"");

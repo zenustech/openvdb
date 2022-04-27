@@ -1,10 +1,6 @@
 // Copyright Contributors to the OpenVDB Project
 // SPDX-License-Identifier: MPL-2.0
 
-#include <cstdio> // for remove()
-#include <fstream>
-#include <sstream>
-#include "gtest/gtest.h"
 #include <openvdb/Exceptions.h>
 #include <openvdb/Types.h>
 #include <openvdb/math/Transform.h>
@@ -19,6 +15,12 @@
 #include <openvdb/tools/ChangeBackground.h>
 #include <openvdb/tools/SignedFloodFill.h>
 #include "util.h" // for unittest_util::makeSphere()
+
+#include <gtest/gtest.h>
+
+#include <cstdio> // for remove()
+#include <fstream>
+#include <sstream>
 
 #define ASSERT_DOUBLES_EXACTLY_EQUAL(expected, actual) \
     EXPECT_NEAR((expected), (actual), /*tolerance=*/0.0);
@@ -291,10 +293,9 @@ TEST_F(TestTree, testSetValue)
     ASSERT_DOUBLES_EXACTLY_EQUAL(15.0, tree.getValue(c1));
     EXPECT_EQ(2, int(tree.activeVoxelCount()));
 
-    float minVal = -999.0, maxVal = -999.0;
-    tree.evalMinMax(minVal, maxVal);
-    ASSERT_DOUBLES_EXACTLY_EQUAL(12.0, minVal);
-    ASSERT_DOUBLES_EXACTLY_EQUAL(15.0, maxVal);
+    const openvdb::math::MinMax<float> extrema = openvdb::tools::minMax(tree);
+    ASSERT_DOUBLES_EXACTLY_EQUAL(12.0, extrema.min());
+    ASSERT_DOUBLES_EXACTLY_EQUAL(15.0, extrema.max());
 
     tree.setValueOff(c0, background);
 
@@ -460,178 +461,6 @@ TEST_F(TestTree, testSetValueInPlace)
     // use slower de-allocation to ensure that no value copying occurs
 
     tree.root().clear();
-}
-
-namespace {
-
-/// Helper function to test openvdb::tree::Tree::evalMinMax() for various tree types
-template<typename TreeT>
-void
-evalMinMaxTest()
-{
-    using ValueT = typename TreeT::ValueType;
-
-    struct Local {
-        static bool isEqual(const ValueT& a, const ValueT& b) {
-            using namespace openvdb; // for operator>()
-            return !(math::Abs(a - b) > zeroVal<ValueT>());
-        }
-    };
-
-    const ValueT
-        zero = openvdb::zeroVal<ValueT>(),
-        minusTwo = zero + (-2),
-        plusTwo = zero + 2,
-        five = zero + 5;
-
-    TreeT tree(/*background=*/five);
-
-    // No set voxels (defaults to min = max = zero)
-    ValueT minVal = five, maxVal = five;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_TRUE(Local::isEqual(minVal, zero));
-    EXPECT_TRUE(Local::isEqual(maxVal, zero));
-
-    // Only one set voxel
-    tree.setValue(openvdb::Coord(0, 0, 0), minusTwo);
-    minVal = maxVal = five;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_TRUE(Local::isEqual(minVal, minusTwo));
-    EXPECT_TRUE(Local::isEqual(maxVal, minusTwo));
-
-    // Multiple set voxels, single value
-    tree.setValue(openvdb::Coord(10, 10, 10), minusTwo);
-    minVal = maxVal = five;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_TRUE(Local::isEqual(minVal, minusTwo));
-    EXPECT_TRUE(Local::isEqual(maxVal, minusTwo));
-
-    // Multiple set voxels, multiple values
-    tree.setValue(openvdb::Coord(10, 10, 10), plusTwo);
-    tree.setValue(openvdb::Coord(-10, -10, -10), zero);
-    minVal = maxVal = five;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_TRUE(Local::isEqual(minVal, minusTwo));
-    EXPECT_TRUE(Local::isEqual(maxVal, plusTwo));
-}
-
-/// Specialization for boolean trees
-template<>
-void
-evalMinMaxTest<openvdb::BoolTree>()
-{
-    openvdb::BoolTree tree(/*background=*/false);
-
-    // No set voxels (defaults to min = max = zero)
-    bool minVal = true, maxVal = false;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(false, minVal);
-    EXPECT_EQ(false, maxVal);
-
-    // Only one set voxel
-    tree.setValue(openvdb::Coord(0, 0, 0), true);
-    minVal = maxVal = false;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(true, minVal);
-    EXPECT_EQ(true, maxVal);
-
-    // Multiple set voxels, single value
-    tree.setValue(openvdb::Coord(-10, -10, -10), true);
-    minVal = maxVal = false;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(true, minVal);
-    EXPECT_EQ(true, maxVal);
-
-    // Multiple set voxels, multiple values
-    tree.setValue(openvdb::Coord(10, 10, 10), false);
-    minVal = true; maxVal = false;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(false, minVal);
-    EXPECT_EQ(true, maxVal);
-}
-
-/// Specialization for string trees
-template<>
-void
-evalMinMaxTest<openvdb::StringTree>()
-{
-    const std::string
-        echidna("echidna"), loris("loris"), pangolin("pangolin");
-
-    openvdb::StringTree tree(/*background=*/loris);
-
-    // No set voxels (defaults to min = max = zero)
-    std::string minVal, maxVal;
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(std::string(), minVal);
-    EXPECT_EQ(std::string(), maxVal);
-
-    // Only one set voxel
-    tree.setValue(openvdb::Coord(0, 0, 0), pangolin);
-    minVal.clear(); maxVal.clear();
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(pangolin, minVal);
-    EXPECT_EQ(pangolin, maxVal);
-
-    // Multiple set voxels, single value
-    tree.setValue(openvdb::Coord(-10, -10, -10), pangolin);
-    minVal.clear(); maxVal.clear();
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(pangolin, minVal);
-    EXPECT_EQ(pangolin, maxVal);
-
-    // Multiple set voxels, multiple values
-    tree.setValue(openvdb::Coord(10, 10, 10), echidna);
-    minVal.clear(); maxVal.clear();
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(echidna, minVal);
-    EXPECT_EQ(pangolin, maxVal);
-}
-
-/// Specialization for Coord trees
-template<>
-void
-evalMinMaxTest<openvdb::Coord>()
-{
-    using CoordTree = openvdb::tree::Tree4<openvdb::Coord,5,4,3>::Type;
-    const openvdb::Coord backg(5,4,-6), a(5,4,-7), b(5,5,-6);
-
-    CoordTree tree(backg);
-
-    // No set voxels (defaults to min = max = zero)
-    openvdb::Coord minVal=openvdb::Coord::max(), maxVal=openvdb::Coord::min();
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(openvdb::Coord(0), minVal);
-    EXPECT_EQ(openvdb::Coord(0), maxVal);
-
-    // Only one set voxel
-    tree.setValue(openvdb::Coord(0, 0, 0), a);
-    minVal=openvdb::Coord::max();
-    maxVal=openvdb::Coord::min();
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(a, minVal);
-    EXPECT_EQ(a, maxVal);
-
-    // Multiple set voxels
-    tree.setValue(openvdb::Coord(-10, -10, -10), b);
-    minVal=openvdb::Coord::max();
-    maxVal=openvdb::Coord::min();
-    tree.evalMinMax(minVal, maxVal);
-    EXPECT_EQ(a, minVal);
-    EXPECT_EQ(b, maxVal);
-}
-
-} // unnamed namespace
-
-TEST_F(TestTree, testEvalMinMax)
-{
-    evalMinMaxTest<openvdb::BoolTree>();
-    evalMinMaxTest<openvdb::FloatTree>();
-    evalMinMaxTest<openvdb::Int32Tree>();
-    evalMinMaxTest<openvdb::Vec3STree>();
-    evalMinMaxTest<openvdb::Vec2ITree>();
-    evalMinMaxTest<openvdb::StringTree>();
-    evalMinMaxTest<openvdb::Coord>();
 }
 
 
@@ -1504,6 +1333,59 @@ TEST_F(TestTree, testTopologyUnion)
         }
     }
 
+    { // test preservation of source tiles
+        using LeafT = openvdb::BoolTree::LeafNodeType;
+        using InternalT1 = openvdb::BoolTree::RootNodeType::NodeChainType::Get<1>;
+        using InternalT2 = openvdb::BoolTree::RootNodeType::NodeChainType::Get<2>;
+        openvdb::BoolTree tree0, tree1;
+        const openvdb::Coord xyz(0);
+
+        tree0.addTile(1, xyz, true, true); // leaf level tile
+        tree1.touchLeaf(xyz)->setValueOn(0); // single leaf
+        tree0.topologyUnion(tree1, true); // single tile
+        EXPECT_EQ(openvdb::Index32(0), tree0.leafCount());
+        EXPECT_EQ(openvdb::Index32(3), tree0.nonLeafCount());
+        EXPECT_EQ(openvdb::Index64(1), tree0.activeTileCount());
+        EXPECT_EQ(openvdb::Index64(LeafT::NUM_VOXELS), tree0.activeVoxelCount());
+
+        tree1.addTile(1, xyz + openvdb::Coord(8), true, true); // leaf + tile
+        tree0.topologyUnion(tree1, true); // two tiles
+        EXPECT_EQ(openvdb::Index32(0), tree0.leafCount());
+        EXPECT_EQ(openvdb::Index32(3), tree0.nonLeafCount());
+        EXPECT_EQ(openvdb::Index64(2), tree0.activeTileCount());
+        EXPECT_EQ(openvdb::Index64(LeafT::NUM_VOXELS*2), tree0.activeVoxelCount());
+
+        // internal node level
+        tree0.clear();
+        tree0.addTile(2, xyz, true, true);
+        tree0.topologyUnion(tree1, true); // all topology in tree1 is already active. no change
+        EXPECT_EQ(openvdb::Index32(0), tree0.leafCount());
+        EXPECT_EQ(openvdb::Index32(2), tree0.nonLeafCount());
+        EXPECT_EQ(openvdb::Index64(1), tree0.activeTileCount());
+        EXPECT_EQ(openvdb::Index64(InternalT1::NUM_VOXELS), tree0.activeVoxelCount());
+
+        // internal node level
+        tree0.clear();
+        tree0.addTile(3, xyz, true, true);
+        tree0.topologyUnion(tree1, true);
+        EXPECT_EQ(openvdb::Index32(0), tree0.leafCount());
+        EXPECT_EQ(openvdb::Index32(1), tree0.nonLeafCount());
+        EXPECT_EQ(openvdb::Index64(1), tree0.activeTileCount());
+        EXPECT_EQ(openvdb::Index64(InternalT2::NUM_VOXELS), tree0.activeVoxelCount());
+
+        // larger tile in tree1 still forces child topology tree0
+        tree0.clear();
+        tree1.clear();
+        tree0.addTile(1, xyz, true, true);
+        tree1.addTile(2, xyz, true, true);
+        tree0.topologyUnion(tree1, true);
+        EXPECT_EQ(openvdb::Index32(0), tree0.leafCount());
+        EXPECT_EQ(openvdb::Index32(3), tree0.nonLeafCount());
+        openvdb::Index64 tiles = openvdb::Index64(InternalT1::DIM) / InternalT1::getChildDim();
+        tiles = tiles * tiles * tiles;
+        EXPECT_EQ(tiles, tree0.activeTileCount());
+        EXPECT_EQ(openvdb::Index64(InternalT1::NUM_VOXELS), tree0.activeVoxelCount());
+    }
 }// testTopologyUnion
 
 TEST_F(TestTree, testTopologyIntersection)
@@ -2664,6 +2546,17 @@ TEST_F(TestTree, testGetNodes)
     */
 }// testGetNodes
 
+// unique_ptr wrapper around a value type for a stl container
+template <typename NodeT, template<class, class> class Container>
+struct SafeArray {
+    using value_type = NodeT*;
+    inline void reserve(const size_t size) { mContainer.reserve(size); }
+    void push_back(value_type ptr) { mContainer.emplace_back(ptr); }
+    size_t size() const { return mContainer.size(); }
+    inline const NodeT* operator[](const size_t idx) const { return mContainer[idx].get(); }
+    Container<std::unique_ptr<NodeT>, std::allocator<std::unique_ptr<NodeT>>> mContainer;
+};
+
 TEST_F(TestTree, testStealNodes)
 {
     //openvdb::util::CpuTimer timer;
@@ -2689,7 +2582,7 @@ TEST_F(TestTree, testStealNodes)
 
     {//testing Tree::stealNodes() with std::vector<T*>
         FloatTree tree2 = tree;
-        std::vector<openvdb::FloatTree::LeafNodeType*> array;
+        SafeArray<openvdb::FloatTree::LeafNodeType, std::vector> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::vector<T*> and Tree::stealNodes()");
         tree2.stealNodes(array);
@@ -2702,7 +2595,7 @@ TEST_F(TestTree, testStealNodes)
     }
     {//testing Tree::stealNodes() with std::vector<const T*>
         FloatTree tree2 = tree;
-        std::vector<const openvdb::FloatTree::LeafNodeType*> array;
+        SafeArray<const openvdb::FloatTree::LeafNodeType, std::vector> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::vector<const T*> and Tree::stealNodes()");
         tree2.stealNodes(array);
@@ -2715,7 +2608,7 @@ TEST_F(TestTree, testStealNodes)
     }
     {//testing Tree::stealNodes() const with std::vector<const T*>
         FloatTree tree2 = tree;
-        std::vector<const openvdb::FloatTree::LeafNodeType*> array;
+        SafeArray<const openvdb::FloatTree::LeafNodeType, std::vector> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::vector<const T*> and Tree::stealNodes() const");
         tree2.stealNodes(array);
@@ -2728,7 +2621,7 @@ TEST_F(TestTree, testStealNodes)
     }
     {//testing Tree::stealNodes() with std::vector<T*> and std::vector::reserve
         FloatTree tree2 = tree;
-        std::vector<openvdb::FloatTree::LeafNodeType*> array;
+        SafeArray<openvdb::FloatTree::LeafNodeType, std::vector> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::vector<T*>, std::vector::reserve and Tree::stealNodes");
         array.reserve(tree2.leafCount());
@@ -2742,7 +2635,7 @@ TEST_F(TestTree, testStealNodes)
     }
     {//testing Tree::getNodes() with std::deque<T*>
         FloatTree tree2 = tree;
-        std::deque<const openvdb::FloatTree::LeafNodeType*> array;
+        SafeArray<const openvdb::FloatTree::LeafNodeType, std::deque> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::deque<T*> and Tree::stealNodes");
         tree2.stealNodes(array);
@@ -2755,7 +2648,7 @@ TEST_F(TestTree, testStealNodes)
     }
     {//testing Tree::getNodes() with std::deque<T*>
         FloatTree tree2 = tree;
-        std::deque<const openvdb::FloatTree::RootNodeType::ChildNodeType*> array;
+        SafeArray<const openvdb::FloatTree::RootNodeType::ChildNodeType, std::deque> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::deque<T*> and Tree::stealNodes");
         tree2.stealNodes(array, 0.0f, true);
@@ -2764,8 +2657,9 @@ TEST_F(TestTree, testStealNodes)
         EXPECT_EQ(size_t(0), size_t(tree2.leafCount()));
     }
     {//testing Tree::getNodes() with std::deque<T*>
+        using NodeT = openvdb::FloatTree::RootNodeType::ChildNodeType::ChildNodeType;
         FloatTree tree2 = tree;
-        std::deque<const openvdb::FloatTree::RootNodeType::ChildNodeType::ChildNodeType*> array;
+        SafeArray<const NodeT, std::deque> array;
         EXPECT_EQ(size_t(0), array.size());
         //timer.start("\nstd::deque<T*> and Tree::stealNodes");
         tree2.stealNodes(array);
@@ -2869,7 +2763,6 @@ TEST_F(TestTree, testStealNode)
     }
 }
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
 TEST_F(TestTree, testNodeCount)
 {
     //openvdb::util::CpuTimer timer;// use for benchmark test
@@ -2897,7 +2790,6 @@ TEST_F(TestTree, testNodeCount)
     EXPECT_EQ(tree.leafCount(), nodeCount2.front());// leaf nodes
     for (size_t i=0; i<nodeCount2.size(); ++i) EXPECT_EQ( nodeCount1[i], nodeCount2[i]);
 }
-#endif
 
 TEST_F(TestTree, testRootNode)
 {
@@ -2982,6 +2874,19 @@ TEST_F(TestTree, testRootNode)
             EXPECT_EQ(c1, rootIter.getCoord());
         }
     }
+
+#if OPENVDB_ABI_VERSION_NUMBER >= 9
+    { // test transient data
+        RootNodeType rootNode(0.0f);
+        EXPECT_EQ(openvdb::Index32(0), rootNode.transientData());
+        rootNode.setTransientData(openvdb::Index32(5));
+        EXPECT_EQ(openvdb::Index32(5), rootNode.transientData());
+        RootNodeType rootNode2(rootNode);
+        EXPECT_EQ(openvdb::Index32(5), rootNode2.transientData());
+        RootNodeType rootNode3 = rootNode;
+        EXPECT_EQ(openvdb::Index32(5), rootNode3.transientData());
+    }
+#endif
 }
 
 TEST_F(TestTree, testInternalNode)
@@ -3072,8 +2977,23 @@ TEST_F(TestTree, testInternalNode)
         EXPECT_TRUE(internalNode.isChildMaskOn(index2));
 
         // fail otherwise
-        EXPECT_TRUE(!internalNode.addChild(new ChildType(c0.offsetBy(8000,0,0))));
+        auto* child = new ChildType(c0.offsetBy(8000,0,0));
+        EXPECT_TRUE(!internalNode.addChild(child));
+        delete child;
     }
+
+#if OPENVDB_ABI_VERSION_NUMBER >= 9
+    { // test transient data
+        InternalNodeType internalNode(c1, 0.0f);
+        EXPECT_EQ(openvdb::Index32(0), internalNode.transientData());
+        internalNode.setTransientData(openvdb::Index32(5));
+        EXPECT_EQ(openvdb::Index32(5), internalNode.transientData());
+        InternalNodeType internalNode2(internalNode);
+        EXPECT_EQ(openvdb::Index32(5), internalNode2.transientData());
+        InternalNodeType internalNode3 = internalNode;
+        EXPECT_EQ(openvdb::Index32(5), internalNode3.transientData());
+    }
+#endif
 }
 
 // Copyright (c) DreamWorks Animation LLC

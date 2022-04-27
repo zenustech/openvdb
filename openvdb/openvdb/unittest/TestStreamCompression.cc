@@ -1,10 +1,10 @@
 // Copyright Contributors to the OpenVDB Project
 // SPDX-License-Identifier: MPL-2.0
 
-#include "gtest/gtest.h"
 #include <openvdb/points/StreamCompression.h>
-
 #include <openvdb/io/Compression.h> // io::COMPRESS_BLOSC
+
+#include <gtest/gtest.h>
 
 #ifdef __clang__
 #pragma GCC diagnostic push
@@ -19,14 +19,11 @@
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/iostreams/device/array.hpp>
 #include <boost/iostreams/stream.hpp>
-#include <boost/system/error_code.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/version.hpp> // for BOOST_VERSION
 
-#include <tbb/atomic.h>
-
-#ifdef _MSC_VER
+#ifdef _WIN32
 #include <boost/interprocess/detail/os_file_functions.hpp> // open_existing_file(), close_file()
 // boost::interprocess::detail was renamed to boost::interprocess::ipcdetail in Boost 1.48.
 // Ensure that both namespaces exist.
@@ -38,6 +35,7 @@ namespace boost { namespace interprocess { namespace detail {} namespace ipcdeta
 #include <unistd.h> // for unlink()
 #endif
 
+#include <atomic>
 #include <fstream>
 #include <numeric> // for std::iota()
 
@@ -72,7 +70,7 @@ private:
         {
             mLastWriteTime = 0;
             const char* regionFilename = mMap.get_name();
-#ifdef _MSC_VER
+#ifdef _WIN32
             using namespace boost::interprocess::detail;
             using namespace boost::interprocess::ipcdetail;
             using openvdb::Index64;
@@ -97,7 +95,7 @@ private:
         boost::interprocess::mapped_region mRegion;
         bool mAutoDelete = false;
         Notifier mNotifier;
-        mutable tbb::atomic<openvdb::Index64> mLastWriteTime;
+        mutable std::atomic<openvdb::Index64> mLastWriteTime;
     }; // class Impl
     std::unique_ptr<Impl> mImpl;
 }; // class ProxyMappedFile
@@ -128,7 +126,6 @@ TEST_F(TestStreamCompression, testBlosc)
 
     { // valid buffer
         // compress
-
         std::unique_ptr<int[]> uncompressedBuffer(new int[count]);
 
         for (int i = 0; i < count; i++) {
@@ -243,7 +240,7 @@ TEST_F(TestStreamCompression, testBlosc)
         // compress
 
         std::vector<int> smallBuffer;
-        smallBuffer.reserve(count);
+        smallBuffer.resize(count);
 
         for (int i = 0; i < count; i++)     smallBuffer[i] = i;
 
@@ -284,11 +281,15 @@ TEST_F(TestStreamCompression, testBlosc)
         std::vector<int> values;
         values.reserve(uncompressedCount); // 128 bytes
 
-        for (int i = 0; i < uncompressedCount; i++)     values.push_back(i*10000);
+        // insert a sequence of 32 integer values that cannot be compressed using Blosc
 
-        std::random_device rng;
-        std::mt19937 urng(rng());
-        std::shuffle(values.begin(), values.end(), urng);
+        for (int i = 0; i < uncompressedCount; i++) {
+            if ((i%2) == 0) {
+                values.push_back(i * 12340);
+            } else {
+                values.push_back(i * 56780);
+            }
+        }
 
         std::unique_ptr<int[]> uncompressedBuffer(new int[values.size()]);
 
@@ -415,17 +416,7 @@ TestStreamCompression::testPagedStreams()
         ostream.write(reinterpret_cast<const char*>(&values[0]), values.size());
         ostream.flush();
 
-#ifdef OPENVDB_USE_BLOSC
-#ifdef BLOSC_BACKWARDS_COMPATIBLE
-        EXPECT_EQ(ss.tellp(), std::streampos(5400));
-#else
-#ifdef BLOSC_HCR_BLOCKSIZE_OPTIMIZATION
-        EXPECT_EQ(ss.tellp(), std::streampos(4422));
-#else
-        EXPECT_EQ(ss.tellp(), std::streampos(4452));
-#endif
-#endif
-#else
+#ifndef OPENVDB_USE_BLOSC
         EXPECT_EQ(ss.tellp(), std::streampos(PageSize+sizeof(int)));
 #endif
 
@@ -448,17 +439,7 @@ TestStreamCompression::testPagedStreams()
 
         istream.read(handle, values.size(), false);
 
-#ifdef OPENVDB_USE_BLOSC
-#ifdef BLOSC_BACKWARDS_COMPATIBLE
-        EXPECT_EQ(ss.tellg(), std::streampos(5400));
-#else
-#ifdef BLOSC_HCR_BLOCKSIZE_OPTIMIZATION
-        EXPECT_EQ(ss.tellg(), std::streampos(4422));
-#else
-        EXPECT_EQ(ss.tellg(), std::streampos(4452));
-#endif
-#endif
-#else
+#ifndef OPENVDB_USE_BLOSC
         EXPECT_EQ(ss.tellg(), std::streampos(PageSize+sizeof(int)));
 #endif
 
@@ -473,7 +454,7 @@ TestStreamCompression::testPagedStreams()
 
     std::string tempDir;
     if (const char* dir = std::getenv("TMPDIR")) tempDir = dir;
-#ifdef _MSC_VER
+#ifdef _WIN32
     if (tempDir.empty()) {
         char tempDirBuffer[MAX_PATH+1];
         int tempDirLen = GetTempPath(MAX_PATH+1, tempDirBuffer);
@@ -541,17 +522,7 @@ TestStreamCompression::testPagedStreams()
 
             ostream.flush();
 
-#ifdef OPENVDB_USE_BLOSC
-#ifdef BLOSC_BACKWARDS_COMPATIBLE
-            EXPECT_EQ(fileout.tellp(), std::streampos(51480));
-#else
-#ifdef BLOSC_HCR_BLOCKSIZE_OPTIMIZATION
-            EXPECT_EQ(fileout.tellp(), std::streampos(42424));
-#else
-            EXPECT_EQ(fileout.tellp(), std::streampos(42724));
-#endif
-#endif
-#else
+#ifndef OPENVDB_USE_BLOSC
             EXPECT_EQ(fileout.tellp(), std::streampos(values.size()+sizeof(int)*pages));
 #endif
 

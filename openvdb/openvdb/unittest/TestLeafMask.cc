@@ -1,15 +1,14 @@
 // Copyright Contributors to the OpenVDB Project
 // SPDX-License-Identifier: MPL-2.0
 
-#include <set>
-#include "gtest/gtest.h"
 #include <openvdb/openvdb.h>
 #include <openvdb/Types.h>
 #include <openvdb/tools/Filter.h>
 #include <openvdb/tree/LeafNode.h>
 #include <openvdb/util/logging.h>
 #include "util.h" // for unittest_util::makeSphere()
-
+#include <gtest/gtest.h>
+#include <set>
 
 class TestLeafMask: public ::testing::Test
 {
@@ -562,3 +561,18 @@ TEST_F(TestLeafMask, testMedian)
 //     // since the active voxels were all true to begin with.
 //     EXPECT_TRUE(tree->hasSameTopology(*copyOfTree));
 // }
+
+#if OPENVDB_ABI_VERSION_NUMBER >= 9
+TEST_F(TestLeafMask, testTransientData)
+{
+    LeafType leaf(openvdb::Coord(0, 0, 0), /*background=*/false);
+
+    EXPECT_EQ(openvdb::Index32(0), leaf.transientData());
+    leaf.setTransientData(openvdb::Index32(5));
+    EXPECT_EQ(openvdb::Index32(5), leaf.transientData());
+    LeafType leaf2(leaf);
+    EXPECT_EQ(openvdb::Index32(5), leaf2.transientData());
+    LeafType leaf3 = leaf;
+    EXPECT_EQ(openvdb::Index32(5), leaf3.transientData());
+}
+#endif

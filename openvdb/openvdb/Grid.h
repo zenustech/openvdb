@@ -99,7 +99,6 @@ public:
     /// transform are deep copies of this grid's and whose tree is default-constructed.
     virtual GridBase::Ptr copyGridWithNewTree() const = 0;
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
     /// @brief Return a new grid of the same type as this grid whose tree and transform
     /// is shared with this grid and whose metadata is provided as an argument.
     virtual GridBase::ConstPtr copyGridReplacingMetadata(const MetaMap& meta) const = 0;
@@ -113,7 +112,6 @@ public:
     /// @throw ValueError if the transform pointer is null
     virtual GridBase::ConstPtr copyGridReplacingMetadataAndTransform(const MetaMap& meta,
         math::Transform::Ptr xform) const = 0;
-#endif
 
     /// Return a new grid whose metadata, transform and tree are deep copies of this grid's.
     virtual GridBase::Ptr deepCopyGrid() const = 0;
@@ -174,6 +172,11 @@ public:
     /// @brief Return a pointer to this grid's tree, which might be
     /// shared with other grids.  The pointer is guaranteed to be non-null.
     virtual TreeBase::ConstPtr constBaseTreePtr() const = 0;
+
+#if OPENVDB_ABI_VERSION_NUMBER >= 8
+    /// @brief Return true if tree is not shared with another grid.
+    virtual bool isTreeUnique() const = 0;
+#endif
 
     /// @brief Return a reference to this grid's tree, which might be
     /// shared with other grids.
@@ -480,11 +483,9 @@ protected:
     /// @brief Initialize with an identity linear transform.
     GridBase(): mTransform(math::Transform::createLinearTransform()) {}
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
     /// @brief Initialize with metadata and a transform.
     /// @throw ValueError if the transform pointer is null
     GridBase(const MetaMap& meta, math::Transform::Ptr xform);
-#endif
 
     /// @brief Deep copy another grid's metadata and transform.
     GridBase(const GridBase& other): MetaMap(other), mTransform(other.mTransform->copy()) {}
@@ -670,7 +671,6 @@ public:
     /// @name Copying
     /// @{
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
     /// @brief Return a new grid of the same type as this grid whose tree and transform
     /// is shared with this grid and whose metadata is provided as an argument.
     ConstPtr copyReplacingMetadata(const MetaMap& meta) const;
@@ -698,7 +698,6 @@ public:
     /// @throw ValueError if the transform pointer is null
     GridBase::ConstPtr copyGridReplacingMetadataAndTransform(const MetaMap& meta,
         math::Transform::Ptr xform) const override;
-#endif
 
     /// @brief Return a new grid whose metadata, transform and tree are deep copies of this grid's.
     Ptr deepCopy() const { return Ptr(new Grid(*this)); }
@@ -877,6 +876,8 @@ public:
     /// Return the dimensions of the axis-aligned bounding box of all active voxels.
     Coord evalActiveVoxelDim() const override;
     /// Return the minimum and maximum active values in this grid.
+    OPENVDB_DEPRECATED_MESSAGE("Switch from grid->evalMinMax(minVal, maxVal) to \
+tools::minMax(grid->tree()). Use threaded = false for serial execution")
     void evalMinMax(ValueType& minVal, ValueType& maxVal) const;
 
     /// Return the number of bytes of memory used by this grid.
@@ -898,8 +899,12 @@ public:
     TreeBase::ConstPtr constBaseTreePtr() const override { return mTree; }
     //@}
     /// @brief Return true if tree is not shared with another grid.
-    /// @todo Make this into a virtual function with ABI=8
+    /// @note This is a virtual function with ABI=8
+#if OPENVDB_ABI_VERSION_NUMBER >= 8
+    bool isTreeUnique() const final;
+#else
     bool isTreeUnique() const;
+#endif
     //@{
     /// @brief Return a reference to this grid's tree, which might be
     /// shared with other grids.
@@ -969,14 +974,7 @@ public:
     /// Return @c true if this grid type is registered.
     static bool isRegistered() { return GridBase::isRegistered(Grid::gridType()); }
     /// Register this grid type along with a factory function.
-    static void registerGrid()
-    {
-        GridBase::registerGrid(Grid::gridType(), Grid::factory);
-        if (!tree::internal::LeafBufferFlags<ValueType>::IsAtomic) {
-            OPENVDB_LOG_WARN("delayed loading of grids of type " << Grid::gridType()
-                << " might not be threadsafe on this platform");
-        }
-    }
+    static void registerGrid() { GridBase::registerGrid(Grid::gridType(), Grid::factory); }
     /// Remove this grid type from the registry.
     static void unregisterGrid() { GridBase::unregisterGrid(Grid::gridType()); }
 
@@ -984,10 +982,8 @@ public:
 
 
 private:
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
     /// Deep copy metadata, but share tree and transform.
     Grid(TreePtrType tree, const MetaMap& meta, math::Transform::Ptr xform);
-#endif
 
     /// Helper function for use with registerGrid()
     static GridBase::Ptr factory() { return Grid::create(); }
@@ -1186,14 +1182,12 @@ struct HasMultiPassIO<Grid<TreeType>> {
 
 ////////////////////////////////////////
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
 inline GridBase::GridBase(const MetaMap& meta, math::Transform::Ptr xform)
     : MetaMap(meta)
     , mTransform(xform)
 {
     if (!xform) OPENVDB_THROW(ValueError, "Transform pointer is null");
 }
-#endif
 
 template<typename GridType>
 inline typename GridType::Ptr
@@ -1271,7 +1265,6 @@ inline Grid<TreeT>::Grid(TreePtrType tree): mTree(tree)
 }
 
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
 template<typename TreeT>
 inline Grid<TreeT>::Grid(TreePtrType tree, const MetaMap& meta, math::Transform::Ptr xform):
     GridBase(meta, xform),
@@ -1279,7 +1272,6 @@ inline Grid<TreeT>::Grid(TreePtrType tree, const MetaMap& meta, math::Transform:
 {
     if (!tree) OPENVDB_THROW(ValueError, "Tree pointer is null");
 }
-#endif
 
 
 template<typename TreeT>
@@ -1362,7 +1354,6 @@ Grid<TreeT>::copy() const
 }
 
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
 template<typename TreeT>
 inline typename Grid<TreeT>::ConstPtr
 Grid<TreeT>::copyReplacingMetadata(const MetaMap& meta) const
@@ -1388,7 +1379,6 @@ Grid<TreeT>::copyReplacingMetadataAndTransform(const MetaMap& meta,
     TreePtrType treePtr = ConstPtrCast<TreeT>(this->constTreePtr());
     return ConstPtr{new Grid<TreeT>{treePtr, meta, xform}};
 }
-#endif
 
 
 template<typename TreeT>
@@ -1423,7 +1413,6 @@ Grid<TreeT>::copyGrid() const
     return this->copy();
 }
 
-#if OPENVDB_ABI_VERSION_NUMBER >= 7
 template<typename TreeT>
 inline GridBase::ConstPtr
 Grid<TreeT>::copyGridReplacingMetadata(const MetaMap& meta) const
@@ -1445,7 +1434,6 @@ Grid<TreeT>::copyGridReplacingMetadataAndTransform(const MetaMap& meta,
 {
     return this->copyReplacingMetadataAndTransform(meta, xform);
 }
-#endif
 
 template<typename TreeT>
 inline GridBase::Ptr
@@ -1569,7 +1557,9 @@ template<typename TreeT>
 inline void
 Grid<TreeT>::evalMinMax(ValueType& minVal, ValueType& maxVal) const
 {
+    OPENVDB_NO_DEPRECATION_WARNING_BEGIN
     tree().evalMinMax(minVal, maxVal);
+    OPENVDB_NO_DEPRECATION_WARNING_END
 }
 
 
@@ -1777,6 +1767,7 @@ createLevelSet(Real voxelSize, Real halfWidth)
 
 ////////////////////////////////////////
 
+/// @cond OPENVDB_DOCS_INTERNAL
 
 namespace internal {
 
@@ -1801,6 +1792,7 @@ struct GridApplyImpl<OpT, GridBaseT, TypeList<GridT, GridTs...>>
 
 } // namespace internal
 
+/// @endcond
 
 template<typename GridTypeListT, typename OpT>
 inline bool

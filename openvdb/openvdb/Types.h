@@ -7,7 +7,29 @@
 #include "version.h"
 #include "Platform.h"
 #include "TypeList.h" // backwards compat
+
+#ifdef OPENVDB_USE_IMATH_HALF
+#ifdef OPENVDB_IMATH_VERSION
+#include <Imath/half.h>
+#else
 #include <OpenEXR/half.h>
+#endif
+namespace openvdb {
+OPENVDB_USE_VERSION_NAMESPACE
+namespace OPENVDB_VERSION_NAME {
+namespace math {
+using half = half;
+}}}
+#else
+#include <openvdb/math/Half.h>
+namespace openvdb {
+OPENVDB_USE_VERSION_NAMESPACE
+namespace OPENVDB_VERSION_NAME {
+namespace math {
+using half = internal::half;
+}}}
+#endif
+
 #include <openvdb/math/Math.h>
 #include <openvdb/math/BBox.h>
 #include <openvdb/math/Quat.h>
@@ -41,7 +63,7 @@ using Real    = double;
 using Vec2R = math::Vec2<Real>;
 using Vec2I = math::Vec2<Index32>;
 using Vec2f = math::Vec2<float>;
-using Vec2H = math::Vec2<half>;
+using Vec2H = math::Vec2<math::half>;
 using math::Vec2i;
 using math::Vec2s;
 using math::Vec2d;
@@ -50,7 +72,7 @@ using math::Vec2d;
 using Vec3R = math::Vec3<Real>;
 using Vec3I = math::Vec3<Index32>;
 using Vec3f = math::Vec3<float>;
-using Vec3H = math::Vec3<half>;
+using Vec3H = math::Vec3<math::half>;
 using Vec3U8 = math::Vec3<uint8_t>;
 using Vec3U16 = math::Vec3<uint16_t>;
 using math::Vec3i;
@@ -65,7 +87,7 @@ using BBoxd = math::BBox<Vec3d>;
 using Vec4R = math::Vec4<Real>;
 using Vec4I = math::Vec4<Index32>;
 using Vec4f = math::Vec4<float>;
-using Vec4H = math::Vec4<half>;
+using Vec4H = math::Vec4<math::half>;
 using math::Vec4i;
 using math::Vec4s;
 using math::Vec4d;
@@ -254,6 +276,85 @@ struct ValueTraits<T, false>
 };
 
 
+/// @brief Conversion classes for changing the underlying type of VDB types
+/// @{
+template<typename T, typename SubT> struct ConvertElementType { using Type = SubT; };
+template<typename T, typename SubT> struct ConvertElementType<math::Vec2<T>, SubT> { using Type = math::Vec2<SubT>; };
+template<typename T, typename SubT> struct ConvertElementType<math::Vec3<T>, SubT> { using Type = math::Vec3<SubT>; };
+template<typename T, typename SubT> struct ConvertElementType<math::Vec4<T>, SubT> { using Type = math::Vec4<SubT>; };
+template<typename T, typename SubT> struct ConvertElementType<math::Quat<T>, SubT> { using Type = math::Quat<SubT>; };
+template<typename T, typename SubT> struct ConvertElementType<math::Mat3<T>, SubT> { using Type = math::Mat3<SubT>; };
+template<typename T, typename SubT> struct ConvertElementType<math::Mat4<T>, SubT> { using Type = math::Mat4<SubT>; };
+/// @}
+
+namespace types_internal
+{
+template <size_t Bits, bool Signed> struct int_t;
+template <> struct int_t<8ul, true>   { using type = int8_t;   };
+template <> struct int_t<16ul, true>  { using type = int16_t;  };
+template <> struct int_t<32ul, true>  { using type = int32_t;  };
+template <> struct int_t<64ul, true>  { using type = int64_t;  };
+template <> struct int_t<8ul, false>  { using type = uint8_t;  };
+template <> struct int_t<16ul, false> { using type = uint16_t; };
+template <> struct int_t<32ul, false> { using type = uint32_t; };
+template <> struct int_t<64ul, false> { using type = uint64_t; };
+
+template <size_t Bits> struct flt_t;
+template <> struct flt_t<16ul> { using type = math::half; };
+template <> struct flt_t<32ul> { using type = float; };
+template <> struct flt_t<64ul> { using type = double; };
+}
+
+/// @brief Promotion classes which provide an interface for elevating and
+///   demoting a scalar or VDB type to a higher or lower precision. Integer
+///   types preserve their sign. Types promotion are only valid between
+///   8 to 64 bits (long doubles are not supported).
+/// @{
+template<typename T>
+struct PromoteType
+{
+private:
+    template <size_t bits>
+    using TypeT = typename std::conditional<std::is_integral<T>::value,
+        types_internal::int_t<bits, std::is_signed<T>::value>,
+        types_internal::flt_t<std::max(size_t(16), bits)>>::type;
+public:
+    static_assert(sizeof(T) <= 8ul, "Unsupported source type for promotion");
+
+#define OPENVDB_TARGET_BITS(SHIFT, PROMOTE) \
+        std::max(size_t(8), \
+            std::min(size_t(64), (PROMOTE ? size_t(8)*(sizeof(T)<<SHIFT) : \
+                size_t(8)*(sizeof(T)>>SHIFT))))
+    template <size_t Shift = ~0UL> using Promote = typename TypeT<OPENVDB_TARGET_BITS(Shift, true)>::type;
+    template <size_t Shift = ~0UL> using Demote = typename TypeT<OPENVDB_TARGET_BITS(Shift, false)>::type;
+#undef OPENVDB_TARGET_BITS
+
+    using Highest = typename TypeT<64ul>::type;
+    using Lowest = typename TypeT<8ul>::type;
+    using Next = Promote<1>;
+    using Previous = Demote<1>;
+};
+
+template <typename T, template <typename> class ContainerT>
+struct PromoteContainerType
+{
+    template <size_t Shift = ~0UL> using Promote = ContainerT<typename PromoteType<T>::template Promote<Shift>>;
+    template <size_t Shift = ~0UL> using Demote = ContainerT<typename PromoteType<T>::template Demote<Shift>>;
+    using Highest = ContainerT<typename PromoteType<T>::Highest>;
+    using Lowest = ContainerT<typename PromoteType<T>::Lowest>;
+    using Next = ContainerT<typename PromoteType<T>::Next>;
+    using Previous = ContainerT<typename PromoteType<T>::Previous>;
+};
+
+template<typename T> struct PromoteType<math::Vec2<T>> : public PromoteContainerType<T, math::Vec2> {};
+template<typename T> struct PromoteType<math::Vec3<T>> : public PromoteContainerType<T, math::Vec3> {};
+template<typename T> struct PromoteType<math::Vec4<T>> : public PromoteContainerType<T, math::Vec4> {};
+template<typename T> struct PromoteType<math::Quat<T>> : public PromoteContainerType<T, math::Quat> {};
+template<typename T> struct PromoteType<math::Mat3<T>> : public PromoteContainerType<T, math::Mat3> {};
+template<typename T> struct PromoteType<math::Mat4<T>> : public PromoteContainerType<T, math::Mat4> {};
+/// @}
+
+
 ////////////////////////////////////////
 
 
@@ -299,7 +400,7 @@ template<typename FromType, typename ToType> struct CopyConstness {
     using Type = typename std::remove_const<ToType>::type;
 };
 
-/// @cond OPENVDB_TYPES_INTERNAL
+/// @cond OPENVDB_DOCS_INTERNAL
 template<typename FromType, typename ToType> struct CopyConstness<const FromType, ToType> {
     using Type = const ToType;
 };
@@ -376,7 +477,7 @@ enum MergePolicy {
 template<typename T> const char* typeNameAsString()                 { return typeid(T).name(); }
 template<> inline const char* typeNameAsString<bool>()              { return "bool"; }
 template<> inline const char* typeNameAsString<ValueMask>()         { return "mask"; }
-template<> inline const char* typeNameAsString<half>()              { return "half"; }
+template<> inline const char* typeNameAsString<math::half>()              { return "half"; }
 template<> inline const char* typeNameAsString<float>()             { return "float"; }
 template<> inline const char* typeNameAsString<double>()            { return "double"; }
 template<> inline const char* typeNameAsString<int8_t>()            { return "int8"; }
@@ -525,6 +626,7 @@ struct SwappedCombineOp
         CombineArgs<ValueType> swappedArgs(args.b(), args.a(), args.result(),
             args.bIsActive(), args.aIsActive());
         op(swappedArgs);
+        args.setResultIsActive(swappedArgs.resultIsActive());
     }
 
     CombineOp& op;

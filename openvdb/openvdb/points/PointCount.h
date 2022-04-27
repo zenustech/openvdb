@@ -131,6 +131,7 @@ Index64 pointOffsets(   std::vector<Index64>& pointOffsets,
     // allocate and zero values in point offsets array
 
     pointOffsets.assign(tree.leafCount(), Index64(0));
+    if (pointOffsets.empty()) return 0;
 
     // compute total points per-leaf
 
@@ -164,16 +165,20 @@ typename GridT::Ptr
 pointCountGrid( const PointDataGridT& points,
                 const FilterT& filter)
 {
-    static_assert(  std::is_integral<typename GridT::ValueType>::value ||
-                    std::is_floating_point<typename GridT::ValueType>::value,
+    static_assert(std::is_integral<typename GridT::ValueType>::value ||
+                  std::is_floating_point<typename GridT::ValueType>::value,
         "openvdb::points::pointCountGrid must return an integer or floating-point scalar grid");
 
-    // This is safe because the PointDataGrid can only be modified by the deformer
-    using AdapterT = TreeAdapter<typename PointDataGridT::TreeType>;
-    auto& nonConstPoints = const_cast<typename AdapterT::NonConstGridType&>(points);
+    using PointDataTreeT = typename PointDataGridT::TreeType;
+    using TreeT = typename GridT::TreeType;
 
-    return point_mask_internal::convertPointsToScalar<GridT>(
-        nonConstPoints, filter);
+    typename TreeT::Ptr tree =
+        point_mask_internal::convertPointsToScalar<TreeT, PointDataTreeT, FilterT>
+            (points.tree(), filter);
+
+    typename GridT::Ptr grid(new GridT(tree));
+    grid->setTransform(points.transform().copy());
+    return grid;
 }
 
 

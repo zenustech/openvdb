@@ -230,8 +230,6 @@ public:
     {
     }
 
-    virtual ~LeafManager() { }
-
     /// @brief (Re)initialize by resizing (if necessary) and repopulating the leaf array
     /// and by deleting existing auxiliary buffers and allocating new ones.
     /// @details Call this method if the tree's topology, and therefore the number
@@ -538,7 +536,7 @@ public:
     }
 
     template<typename ArrayT>
-    [[deprecated("Use Tree::getNodes()")]] void getNodes(ArrayT& array)
+    OPENVDB_DEPRECATED_MESSAGE("Use Tree::getNodes()") void getNodes(ArrayT& array)
     {
         using T = typename ArrayT::value_type;
         static_assert(std::is_pointer<T>::value, "argument to getNodes() must be a pointer array");
@@ -556,7 +554,7 @@ public:
     }
 
     template<typename ArrayT>
-    [[deprecated("Use Tree::getNodes()")]] void getNodes(ArrayT& array) const
+    OPENVDB_DEPRECATED_MESSAGE("Use Tree::getNodes()") void getNodes(ArrayT& array) const
     {
         using T = typename ArrayT::value_type;
         static_assert(std::is_pointer<T>::value, "argument to getNodes() must be a pointer array");

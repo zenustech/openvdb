@@ -124,6 +124,7 @@ insertStaticAlloca(llvm::IRBuilder<>& B,
                    llvm::Type* type,
                    llvm::Value* size = nullptr)
 {
+    llvm::Type* strtype = LLVMType<codegen::String>::get(B.getContext());
     // Create the allocation at the start of the function block
     llvm::Function* parent = B.GetInsertBlock()->getParent();
     assert(parent && !parent->empty());
@@ -132,6 +133,20 @@ insertStaticAlloca(llvm::IRBuilder<>& B,
     if (block.empty()) B.SetInsertPoint(&block);
     else B.SetInsertPoint(&(block.front()));
     llvm::Value* result = B.CreateAlloca(type, size);
+
+    /// @note  Strings need to be initialised correctly when they are
+    ///   created. We alloc them at the start of the function but
+    ///   strings in branches may not ever be set to anything. If
+    ///   we don't init these correctly, the clearup frees will
+    ///   try and free uninitialised memory
+    if (type == strtype) {
+        llvm::Value* cptr = B.CreateStructGEP(strtype, result, 0); // char**
+        llvm::Value* sso = B.CreateStructGEP(strtype, result, 1); // char[]*
+        llvm::Value* sso_load = B.CreateConstGEP2_64(sso, 0 ,0); // char*
+        llvm::Value* len = B.CreateStructGEP(strtype, result, 2);
+        B.CreateStore(sso_load, cptr); // this->ptr = this->SSO;
+        B.CreateStore(B.getInt64(0), len);
+    }
     B.restoreIP(IP);
     return result;
 }
@@ -200,7 +215,7 @@ typePrecedence(llvm::Type* const typeA,
 /// @brief  Returns a CastFunction which represents the corresponding instruction
 ///         to convert a source llvm Type to a target llvm Type. If the conversion
 ///         is unsupported, throws an error.
-///
+/// @warning  This assumes any integer types are signed.
 /// @param  sourceType  The source type to cast
 /// @param  targetType  The target type to cast to
 /// @param  twine       An optional string description of the cast function. This can
@@ -221,6 +236,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
 
     if (targetType->isDoubleTy()) {
         if (sourceType->isFloatTy())           return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPExt, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPExt, twine);
         else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
         else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
         else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
@@ -229,6 +245,16 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
     }
     else if (targetType->isFloatTy()) {
         if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPTrunc, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPExt, twine);
+        else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
+        else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
+        else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
+        else if (sourceType->isIntegerTy(8))   return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
+        else if (sourceType->isIntegerTy(1))   return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateUIToFP, twine);
+    }
+    else if (targetType->isHalfTy()) {
+        if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPTrunc, twine);
+        else if (sourceType->isFloatTy())      return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPTrunc, twine);
         else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
         else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
         else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSIToFP, twine);
@@ -238,6 +264,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
     else if (targetType->isIntegerTy(64)) {
         if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isFloatTy())      return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSExt, twine);
         else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSExt, twine);
         else if (sourceType->isIntegerTy(8))   return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSExt, twine);
@@ -246,6 +273,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
     else if (targetType->isIntegerTy(32)) {
         if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isFloatTy())      return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSExt, twine);
         else if (sourceType->isIntegerTy(8))   return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSExt, twine);
@@ -254,6 +282,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
     else if (targetType->isIntegerTy(16)) {
         if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isFloatTy())      return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(8))   return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateSExt, twine);
@@ -262,6 +291,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
     else if (targetType->isIntegerTy(8)) {
         if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isFloatTy())      return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToSI, twine);
         else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
@@ -270,6 +300,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
     else if (targetType->isIntegerTy(1)) {
         if (sourceType->isDoubleTy())          return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToUI, twine);
         else if (sourceType->isFloatTy())      return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToUI, twine);
+        else if (sourceType->isHalfTy())       return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateFPToUI, twine);
         else if (sourceType->isIntegerTy(64))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(32))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
         else if (sourceType->isIntegerTy(16))  return BIND_ARITHMETIC_CAST_OP(llvm::IRBuilder<>::CreateTrunc, twine);
@@ -282,7 +313,7 @@ llvmArithmeticConversion(const llvm::Type* const sourceType,
 }
 
 /// @brief  Returns a BinaryFunction representing the corresponding instruction to
-///         peform on two scalar values, relative to a provided operator token. Note that
+///         perform on two scalar values, relative to a provided operator token. Note that
 ///         not all operations are supported on floating point types! If the token is not
 ///         supported, or the llvm type is not a scalar type, throws an error.
 /// @note   Various default arguments are bound to provide a simple function call
@@ -378,11 +409,10 @@ inline bool isValidCast(llvm::Type* from, llvm::Type* to)
 
 /// @brief  Casts a scalar llvm Value to a target scalar llvm Type. Returns
 ///         the cast scalar value of type targetType.
-///
+/// @warning  This assumes any integer types are signed.
 /// @param value       A llvm scalar value to convert
 /// @param targetType  The target llvm scalar type to convert to
 /// @param builder     The current llvm IRBuilder
-///
 inline llvm::Value*
 arithmeticConversion(llvm::Value* value,
                      llvm::Type* targetType,
@@ -449,15 +479,14 @@ arrayCast(llvm::Value* ptrToArray,
     return targetArray;
 }
 
-/// @brief  Converts a vector of loaded llvm scalar values of the same type to a
-/// target scalar type. Each value is converted individually and the loaded result
-///         stored in the same location within values.
-///
+/// @brief Converts a vector of loaded llvm scalar values of the same type to a
+///   target scalar type. Each value is converted individually and the loaded
+///   result stored in the same location within values.
+/// @warning  This assumes any integer types are signed.
 /// @param values             A vector of llvm scalar values to convert
 /// @param targetElementType  The target llvm scalar type to convert each value
 ///                           of the input vector
 /// @param builder            The current llvm IRBuilder
-///
 inline void
 arithmeticConversion(std::vector<llvm::Value*>& values,
                      llvm::Type* targetElementType,
@@ -483,10 +512,9 @@ arithmeticConversion(std::vector<llvm::Value*>& values,
 
 /// @brief  Converts a vector of loaded llvm scalar values to the highest precision
 ///         type stored amongst them. Any values which are not scalar types are ignored
-///
+/// @warning  This assumes any integer types are signed.
 /// @param values   A vector of llvm scalar values to convert
 /// @param builder  The current llvm IRBuilder
-///
 inline void
 arithmeticConversion(std::vector<llvm::Value*>& values,
                      llvm::IRBuilder<>& builder)
@@ -506,11 +534,10 @@ arithmeticConversion(std::vector<llvm::Value*>& values,
 ///         from either of the two incoming values and casts the other value to
 ///         the choosen type if it is not already. The types of valueA and valueB
 ///         are guaranteed to match. Both values must be scalar LLVM types
-///
+/// @warning  This assumes any integer types are signed.
 /// @param valueA   The first llvm value
 /// @param valueB   The second llvm value
 /// @param builder  The current llvm IRBuilder
-///
 inline void
 arithmeticConversion(llvm::Value*& valueA,
                      llvm::Value*& valueB,
@@ -553,7 +580,9 @@ binaryOperator(llvm::Value* lhs, llvm::Value* rhs,
                llvm::IRBuilder<>& builder)
 {
     llvm::Type* lhsType = lhs->getType();
-    assert(lhsType == rhs->getType());
+    assert(lhsType == rhs->getType() ||
+        (token == ast::tokens::SHIFTLEFT ||
+         token == ast::tokens::SHIFTRIGHT));
 
     const ast::tokens::OperatorType opType = ast::tokens::operatorType(token);
 
@@ -767,8 +796,7 @@ scalarToMatrix(llvm::Value* scalar,
         insertStaticAlloca(builder,
             llvm::ArrayType::get(type, dim*dim));
 
-    llvm::Value* zero = llvm::ConstantFP::get(type, 0.0);
-
+    llvm::Value* zero = llvmConstant(0, type);
     for (size_t i = 0; i < dim*dim; ++i) {
         llvm::Value* m = ((i % (dim+1) == 0) ? scalar : zero);
         llvm::Value* element = builder.CreateConstGEP2_64(array, 0, i);
