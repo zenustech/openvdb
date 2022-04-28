@@ -279,13 +279,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 if(OPENVDB_INSTALL_CMAKE_MODULES)
   set(OPENVDB_CMAKE_MODULES
-    cmake/FindBlosc.cmake
+    #cmake/FindBlosc.cmake
     cmake/FindJemalloc.cmake
-    cmake/FindIlmBase.cmake
+    #cmake/FindIlmBase.cmake
     cmake/FindLog4cplus.cmake
-    cmake/FindOpenEXR.cmake
+    #cmake/FindOpenEXR.cmake
     cmake/FindOpenVDB.cmake
-    cmake/FindTBB.cmake
+    #cmake/FindTBB.cmake
     cmake/OpenVDBGLFW3Setup.cmake
     cmake/OpenVDBHoudiniSetup.cmake
     cmake/OpenVDBMayaSetup.cmake
