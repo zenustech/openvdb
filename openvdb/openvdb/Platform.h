@@ -142,9 +142,7 @@
 #if defined __INTEL_COMPILER
     #define OPENVDB_NO_DEPRECATION_WARNING_BEGIN \
         _Pragma("warning (push)") \
-        _Pragma("warning (disable:1478)") \
-        PRAGMA(message("NOTE: ignoring deprecation warning at " __FILE__  \
-            ":" OPENVDB_PREPROC_STRINGIFY(__LINE__)))
+        _Pragma("warning (disable:1478)")
     #define OPENVDB_NO_DEPRECATION_WARNING_END \
         _Pragma("warning (pop)")
 #elif defined __clang__
@@ -157,16 +155,13 @@
 #elif defined __GNUC__
     #define OPENVDB_NO_DEPRECATION_WARNING_BEGIN \
         _Pragma("GCC diagnostic push") \
-        _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"") \
-        _Pragma("message(\"NOTE: ignoring deprecation warning\")")
+        _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
     #define OPENVDB_NO_DEPRECATION_WARNING_END \
         _Pragma("GCC diagnostic pop")
 #elif defined _MSC_VER
     #define OPENVDB_NO_DEPRECATION_WARNING_BEGIN \
         __pragma(warning(push)) \
-        __pragma(warning(disable : 4996)) \
-        __pragma(message("NOTE: ignoring deprecation warning at " __FILE__ \
-            ":" OPENVDB_PREPROC_STRINGIFY(__LINE__)))
+        __pragma(warning(disable : 4996))
     #define OPENVDB_NO_DEPRECATION_WARNING_END \
         __pragma(warning(pop))
 #else
