@@ -157,7 +157,7 @@ endif()
 
 if(USE_BLOSC)
   # Find Blosc libraries
-  find_package(Blosc ${MINIMUM_BLOSC_VERSION} REQUIRED)
+  find_package(Blosc REQUIRED)
   if(Blosc_VERSION)
     if(OPENVDB_FUTURE_DEPRECATION AND FUTURE_MINIMUM_BLOSC_VERSION)
       if(${Blosc_VERSION} VERSION_LESS FUTURE_MINIMUM_BLOSC_VERSION)
