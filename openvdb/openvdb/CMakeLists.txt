@@ -156,7 +156,13 @@ if(USE_LOG4CPLUS)
 endif()
 
 if(USE_BLOSC)
+    set(BUILD_SHARED OFF CACHE BOOL "GUN TMD SHARED" FORCE)
+    set(BUILD_STATIC ON CACHE BOOL "MAKE STATIC GREAT AGAIN" FORCE)
+    set(BUILD_TESTS OFF CACHE BOOL "GUN TMD TEST" FORCE)
     add_subdirectory(c-blosc)
+    if (NOT TARGET blosc_static)
+        message(FATAL_ERROR "Target blosc_static not found!")
+    endif()
   ## Find Blosc libraries
   #find_package(Blosc ${MINIMUM_BLOSC_VERSION} REQUIRED)
   #if(Blosc_VERSION)
@@ -235,7 +241,7 @@ endif()
 # /usr/local
 
 if(USE_BLOSC)
-  list(APPEND OPENVDB_CORE_DEPENDENT_LIBS blosc)
+  list(APPEND OPENVDB_CORE_DEPENDENT_LIBS blosc_static)
 endif()
 
 if(USE_BLOSC OR USE_ZLIB)
