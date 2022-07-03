@@ -1813,7 +1813,7 @@ TypedAttributeArray<ValueType_, Codec_>::writeMetadata(std::ostream& os, bool ou
     uint8_t serializationFlags(0);
     Index size(mSize);
     Index stride(mStrideOrTotalSize);
-    bool strideOfOne(this->stride() == 1);
+    bool strideOfOne(TypedAttributeArray<ValueType_, Codec_>::stride() == 1);
 
     bool bloscCompression = io::getDataCompression(os) & io::COMPRESS_BLOSC;
 
