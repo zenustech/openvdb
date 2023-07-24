@@ -133,7 +133,11 @@ void ZLIB_INTERNAL z_error (m)
 /* exported to allow conversion of error code to string for compress() and
  * uncompress()
  */
+#ifdef _WIN32
 const char * ZEXPORT zError1(err)
+#else
+const char * ZEXPORT zError(err)
+#endif
     int err;
 {
     return ERR_MSG(err);
